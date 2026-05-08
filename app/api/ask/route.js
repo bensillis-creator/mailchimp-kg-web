@@ -35,8 +35,7 @@ async function gemini(prompt, system) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: [{ text: `${system}\n\n${prompt}` }] }],
         generationConfig: { temperature: 0.1 },
       }),
     }
