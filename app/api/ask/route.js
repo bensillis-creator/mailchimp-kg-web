@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import neo4j from 'neo4j-driver'
 
 const SCHEMA = `
@@ -30,13 +29,21 @@ Rules:
 - Prefer returning named columns (AS keyword) for readability.`
 
 async function gemini(prompt, system) {
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash-latest',
-    systemInstruction: system,
-  })
-  const result = await model.generateContent(prompt)
-  return result.response.text().trim()
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1 },
+      }),
+    }
+  )
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error?.message ?? JSON.stringify(data))
+  return data.candidates[0].content.parts[0].text.trim()
 }
 
 export async function POST(req) {
