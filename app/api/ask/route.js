@@ -26,7 +26,9 @@ Rules:
 - Respond with ONLY a valid Cypher query. No markdown, no explanation, no code fences.
 - Always include LIMIT (max 50) unless doing aggregate-only queries.
 - For comparisons across source_type, use collect() or count() with grouping.
-- Prefer returning named columns (AS keyword) for readability.`
+- Prefer returning named columns (AS keyword) for readability.
+- Neo4j 5.x syntax: use EXISTS { (a)-[:R]->(b) } not (a)-[:R]->(b) in WHERE clauses.
+- Never introduce new node variables inside WHERE NOT (...) patterns — use NOT EXISTS { MATCH ... } instead.`
 
 async function callLLM(prompt, system) {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
