@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import neo4j from 'neo4j-driver'
 
 const SCHEMA = `
@@ -21,13 +21,23 @@ Relationships:
 Counts: 593 earned, 60 owned_blog, 20 paid, 3 owned_social content nodes.
 `
 
-const CYPHER_PROMPT = `You generate Cypher queries for a Neo4j knowledge graph about Mailchimp's media presence.
+const CYPHER_SYSTEM = `You generate Cypher queries for a Neo4j knowledge graph about Mailchimp's media presence.
 ${SCHEMA}
 Rules:
-- Respond with ONLY a valid Cypher query. No markdown, no explanation.
+- Respond with ONLY a valid Cypher query. No markdown, no explanation, no code fences.
 - Always include LIMIT (max 50) unless doing aggregate-only queries.
 - For comparisons across source_type, use collect() or count() with grouping.
 - Prefer returning named columns (AS keyword) for readability.`
+
+async function gemini(prompt, system) {
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction: system,
+  })
+  const result = await model.generateContent(prompt)
+  return result.response.text().trim()
+}
 
 export async function POST(req) {
   const { question } = await req.json()
@@ -35,7 +45,6 @@ export async function POST(req) {
     return Response.json({ error: 'No question provided' }, { status: 400 })
   }
 
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const driver = neo4j.driver(
     process.env.NEO4J_URI,
     neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD),
@@ -44,13 +53,9 @@ export async function POST(req) {
 
   try {
     // Step 1: generate Cypher
-    const cypherMsg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 512,
-      system: CYPHER_PROMPT,
-      messages: [{ role: 'user', content: question }],
-    })
-    const cypher = cypherMsg.content[0].text.trim()
+    let cypher = await gemini(question, CYPHER_SYSTEM)
+    // strip any accidental markdown fences
+    cypher = cypher.replace(/^```[\w]*\n?/m, '').replace(/```$/m, '').trim()
 
     // Step 2: run against Neo4j
     const session = driver.session({ database: process.env.NEO4J_DATABASE })
@@ -70,12 +75,7 @@ export async function POST(req) {
     }
 
     // Step 3: interpret
-    const interpretMsg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      messages: [{
-        role: 'user',
-        content: `Question: "${question}"
+    const interpretPrompt = `Question: "${question}"
 
 Cypher used:
 ${cypher}
@@ -83,15 +83,11 @@ ${cypher}
 Raw results (${records.length} rows):
 ${JSON.stringify(records, null, 2)}
 
-Write a clear, direct answer to the question using these results. Lead with the key insight. Where numbers are relevant, include them. Keep it under 150 words.`,
-      }],
-    })
+Write a clear, direct answer to the question using these results. Lead with the key insight. Where numbers are relevant, include them. Keep it under 150 words.`
 
-    return Response.json({
-      answer: interpretMsg.content[0].text,
-      cypher,
-      records,
-    })
+    const answer = await gemini(interpretPrompt, 'You are a media intelligence analyst. Answer concisely and directly.')
+
+    return Response.json({ answer, cypher, records })
   } catch (err) {
     const msg = err.message ?? ''
     const paused = msg.includes('ECONNREFUSED') || msg.includes('ServiceUnavailable') || msg.includes('connect')
