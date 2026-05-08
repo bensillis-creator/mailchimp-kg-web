@@ -28,21 +28,25 @@ Rules:
 - For comparisons across source_type, use collect() or count() with grouping.
 - Prefer returning named columns (AS keyword) for readability.`
 
-async function gemini(prompt, system) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: `${system}\n\n${prompt}` }] }],
-        generationConfig: { temperature: 0.1 },
-      }),
-    }
-  )
+async function callLLM(prompt, system) {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.1-8b-instant',
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error?.message ?? JSON.stringify(data))
-  return data.candidates[0].content.parts[0].text.trim()
+  return data.choices[0].message.content.trim()
 }
 
 export async function POST(req) {
@@ -59,7 +63,7 @@ export async function POST(req) {
 
   try {
     // Step 1: generate Cypher
-    let cypher = await gemini(question, CYPHER_SYSTEM)
+    let cypher = await callLLM(question, CYPHER_SYSTEM)
     // strip any accidental markdown fences
     cypher = cypher.replace(/^```[\w]*\n?/m, '').replace(/```$/m, '').trim()
 
@@ -91,7 +95,7 @@ ${JSON.stringify(records, null, 2)}
 
 Write a clear, direct answer to the question using these results. Lead with the key insight. Where numbers are relevant, include them. Keep it under 150 words.`
 
-    const answer = await gemini(interpretPrompt, 'You are a media intelligence analyst. Answer concisely and directly.')
+    const answer = await callLLM(interpretPrompt, 'You are a media intelligence analyst. Answer concisely and directly.')
 
     return Response.json({ answer, cypher, records })
   } catch (err) {
